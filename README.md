@@ -21,20 +21,3 @@ This guide has been used to set up 18 DROID robot platforms over the course of t
 
 If you encounter issues during setup, please raise them as issues in this github repo.
 
-in openpi repo:
-uv run scripts/serve_policy.py policy:checkpoint --policy.config=pi05_droid_finetune_lora --policy.dir=checkpoints/pi05_droid_finetune_lora/three-blocks-lora/19999
-
-in droid:
-python openpi_inference.py
-
-
-training:
-uv run scripts/train.py pi05_droid_finetune_lora_emg (defined in openpi/train/config.py) --exp-name=three-blocks-full-lora --overwrite
-
-
-after data collection:
-DOCKER: /app/scripts$ python postprocess.py data_dir=/app/data --lab=NECL --do_upload=false
-
-~/temp_droid_data/task2-1$ sudo python3 /home/chopper/droid/droid/postprocessing/util/create_language_annotation_dict.py --metadata=.
-
-uv run examples/droid/convert_droid_data_to_lerobot.py --data_dir /home/chopper/temp_droid_data/task3-1 --repo_name jasontchan/task3-1 --push_to_hub

@@ -4,3 +4,51 @@ open the coffee machine, then pick up the left coffee pod and place it in the co
 
 
 open the coffee machine, then pick up the correct coffee pod and place it in the coffee machine, then close the lid and press start
+
+weigh the correct amount of coffee beans
+
+weigh a half scoop of coffee beans;weigh one scoop of coffee beans;weigh one and a half scoops of coffee beans;weigh two scoops of coffee beans;weigh two and a half scoops of coffee beans;weigh three scoops of coffee beans;weigh three and a half scoops of coffee beans;weigh four scoops of coffee beans
+open the coffee machine, then pick up the correct coffee pod and place it in the coffee machine, then close the lid and press start
+
+pick up the correct block and place it in the bowl
+
+swap the two sponges using a temporary empty spot
+
+
+notes:
+
+in openpi repo:
+uv run scripts/serve_policy.py policy:checkpoint --policy.config=pi05_droid_finetune_lora32 --policy.dir=/home/chopper/flow_openpi/checkpoints/pi05_droid_finetune_lora32/merged-blocks/30000
+uv run scripts/serve_policy.py policy:checkpoint --policy.config=pi05_droid --policy.dir=gs://openpi-assets/checkpoints/pi05_droid
+uv run scripts/serve_policy.py policy:checkpoint --policy.config=pi05_droid_finetune_lora --policy.dir=/home/chopper/cs-188/openpi/checkpoints/pi05_droid_finetune_lora/cs188-3-16/39999
+
+in droid:
+python openpi_inference.py
+
+
+training:
+XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 uv run scripts/train.py pi05_droid_finetune_lora_emg --exp-name=task123-23-123-12 --overwrite
+
+
+after data collection:
+DOCKER: /app/scripts$ python postprocess.py --data_dir=/app/data --lab=NECL --do_upload=false
+
+~/temp_droid_data/task2-1$ sudo python3 /home/chopper/droid/droid/postprocessing/util/create_language_annotation_dict.py --metadata=.
+
+uv run examples/droid/convert_droid_data_to_lerobot.py --data_dir /home/chopper/temp_droid_data/task134-23-12-1 --repo_name jasontchan/task134-23-12-1 --push_to_hub --override_language "insert overwrite here"
+
+
+temp_droid_data/scp -r ubuntu@192.222.51.184:~/filesystem1/openpi-vela/checkpoints/pi05_droid_finetune_lora_emg/task123-23-12345-12_MU-40k/39999/params ~/openpi/task123-23-12345-12_MU-40ktask3-12/Thu_Nov_20_02:24:01_2025;temp_droid_data/task3-12/Thu_Nov_20_03:13:39_2025
+
+
+
+['/temp_droid_data/task2-123/Tue_Nov_18_02:25:29_2025', '/temp_droid_data/task2-123/Sat_Nov_15_23:48:13_2025', '/temp_droid_data/task2-123/Fri_Nov_21_01:20:11_2025', '/temp_droid_data/task2-123/Fri_Nov_21_04:02:21_2025', '/temp_droid_data/task2-123/Tue_Nov_18_04:01:04_2025', '/temp_droid_data/task2-123/Tue_Nov_18_01:28:20_2025', '/temp_droid_data/task2-123/Sun_Nov_16_00:42:36_2025', '/temp_droid_data/task2-123/Tue_Nov_18_02:49:27_2025', '/temp_droid_data/task2-123/Tue_Nov_18_02:10:02_2025', '/temp_droid_data/task2-123/Sun_Nov_16_00:09:23_2025', '/temp_droid_data/task2-123/Fri_Nov_21_03:12:24_2025', '/temp_droid_data/task2-123/Fri_Nov_21_01:16:22_2025', '/temp_droid_data/task2-123/Tue_Nov_18_02:34:00_2025', '/temp_droid_data/task2-123/Sat_Nov_15_22:57:44_2025', '/temp_droid_data/task2-123/Tue_Nov_18_02:35:26_2025', '/temp_droid_data/task2-123/Tue_Nov_18_04:02:28_2025']
+pick up the block and place it in the hole
+
+
+sudo docker compose -f docker-compose-laptop.yaml run  --rm laptop_setup bash
+
+
+pip install pyserial websockets moviepy tyro pynput
+
+uv run examples/droid/convert_droid_data_to_lerobot.py --data_dir /home/chopper/temp_droid_data/task3-12 --repo_name jasontchan/task3-user4 --user_id 4 --push_to_hub;uv run examples/droid/convert_droid_data_to_lerobot.py --data_dir /home/chopper/temp_droid_data/task1-3 --repo_name jasontchan/task1-user4 --user_id 4 --push_to_hub;uv run examples/droid/convert_droid_data_to_lerobot.py --data_dir /home/chopper/temp_droid_data/task1-3 --repo_name jasontchan/task1-user5 --user_id 5 --push_to_hub;uv run examples/droid/convert_droid_data_to_lerobot.py --data_dir /home/chopper/temp_droid_data/task3-12 --repo_name jasontchan/task3-user5 --user_id 5 --push_to_hub;uv run examples/droid/convert_droid_data_to_lerobot.py --data_dir /home/chopper/temp_droid_data/task4-1 --repo_name jasontchan/task4-user5 --user_id 5 --push_to_hub;uv run examples/droid/convert_droid_data_to_lerobot.py --data_dir /home/chopper/temp_droid_data/task1-3 --repo_name jasontchan/task1-user1 --user_id 1 --push_to_hub;uv run examples/droid/convert_droid_data_to_lerobot.py --data_dir /home/chopper/temp_droid_data/task3-12 --repo_name jasontchan/task3-user1 --user_id 1 --push_to_hub;uv run examples/droid/convert_droid_data_to_lerobot.py --data_dir /home/chopper/temp_droid_data/task4-1 --repo_name jasontchan/task4-user1 --user_id 1 --push_to_hub;uv run examples/droid/convert_droid_data_to_lerobot.py --data_dir /home/chopper/temp_droid_data/task1-3 --repo_name jasontchan/task1-user7 --user_id 7 --push_to_hub;uv run examples/droid/convert_droid_data_to_lerobot.py --data_dir /home/chopper/temp_droid_data/task3-12 --repo_name jasontchan/task3-user7 --user_id 7 --push_to_hub;uv run examples/droid/convert_droid_data_to_lerobot.py --data_dir /home/chopper/temp_droid_data/task4-1 --repo_name jasontchan/task4-user7 --user_id 7 --push_to_hub

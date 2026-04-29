@@ -5,10 +5,10 @@ sys.path.insert(0, "/app/droid")
 from pyomyo.src.pyomyo.pyomyo import emg_mode
 
 # Robot Params #
-nuc_ip = "192.168.0.174"
+nuc_ip = "10.0.1.9"
 # nuc_ip = "0.0.0.0"
 robot_ip = "172.16.0.2"
-laptop_ip = "192.168.0.44"
+laptop_ip = "10.0.1.2"
 sudo_password = "necl"
 robot_type = "panda"  # 'panda' or 'fr3'
 robot_serial_number = "289830-1325797"

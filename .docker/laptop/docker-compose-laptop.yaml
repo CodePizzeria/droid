@@ -16,6 +16,8 @@ services:
       ANDROID_ADB_SERVER_ADDRESS: host.docker.internal
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /home/derk/temp_droid_data:/temp_droid_data
+      - /home/derk/forgetting_eval/results:/app/scripts/results
       - ${DOCKER_XAUTH}:${DOCKER_XAUTH}
       - ${ROOT_DIR}/laptop_enter_script.sh:/app/laptop_enter_script.sh:rw
       - ${ROOT_DIR}/openpi-client:/app/openpi-client
@@ -23,6 +25,8 @@ services:
       - ${ROOT_DIR}/scripts/labeling/label_data.py:/app/scripts/labeling/label_data.py:rw
       - ${ROOT_DIR}/scripts/visualizations/visualize_trajectory.py:/app/scripts/visualizations/visualize_trajectory.py:rw
       - ${ROOT_DIR}/scripts/openpi_inference.py:/app/scripts/openpi_inference.py:rw
+      - ${ROOT_DIR}/scripts/openpi_inference_dynamic_instructions.py:/app/scripts/openpi_inference_dynamic_instructions.py:rw
+      - ${ROOT_DIR}/scripts/openpi_inference_dynamic_language_inputs.py:/app/scripts/openpi_inference_dynamic_language_inputs.py:rw
       - ${ROOT_DIR}/droid/postprocessing/util/create_language_annotation_dict.py:/app/droid/postprocessing/util/create_language_annotation_dict.py:rw
       - ${ROOT_DIR}/droid/postprocessing/schema.py:/app/droid/postprocessing/schema.py:rw
       - ${ROOT_DIR}/droid/postprocessing/util/svo2mp4.py:/app/droid/postprocessing/util/svo2mp4.py:rw
@@ -39,6 +43,7 @@ services:
       - ${ROOT_DIR}/droid/trajectory_utils/trajectory_writer.py:/app/droid/trajectory_utils/trajectory_writer.py:rw
       - ${ROOT_DIR}/droid/user_interface/data_collector.py:/app/droid/user_interface/data_collector.py:rw
       - ${ROOT_DIR}/droid/misc/server_interface.py:/app/droid/misc/server_interface.py:rw
+      - ${ROOT_DIR}/droid/misc/tcp.py:/app/droid/misc/tcp.py:rw
       - ${ROOT_DIR}/droid/fairo/polymetis/polymetis/src/clients/franka_panda_client/franka_hand_client.cpp:/app/droid/fairo/polymetis/polymetis/src/clients/franka_panda_client/franka_hand_client.cpp:rw
       - ${ROOT_DIR}/droid/fairo/polymetis/polymetis/protos/polymetis.proto:/app/droid/fairo/polymetis/polymetis/protos/polymetis.proto:rw
       - ${ROOT_DIR}/droid/fairo/polymetis/polymetis/python/polymetis/gripper_interface.py:/app/droid/fairo/polymetis/polymetis/python/polymetis/gripper_interface.py:rw
@@ -46,8 +51,10 @@ services:
       - ${ROOT_DIR}/.docker/laptop/entrypoint.sh:/app/.docker/laptop/entrypoint.sh:rw
       - ${ROOT_DIR}/droid/misc/parameters.py:/app/droid/misc/parameters.py
       - ${ROOT_DIR}/droid/calibration/calibration_info.json:/app/droid/calibration/calibration_info.json
+      - ${ROOT_DIR}/droid/scripts:/app/droid/scripts
       - ${ROOT_DIR}/data:/app/data
       - ${ROOT_DIR}/cache:/app/cache
+      - ${ROOT_DIR}/setup_robot.sh:/app/setup_robot.sh:rw
     build: 
       context: ../../
       dockerfile: .docker/laptop/Dockerfile.laptop

@@ -15,7 +15,7 @@ from droid.emg_utils.utils import make_emg_streams
 
 
 class RobotEnv(gym.Env):
-    def __init__(self, action_space="cartesian_velocity", gripper_action_space=None, camera_kwargs={}, do_reset=True, emg=True):
+    def __init__(self, action_space="cartesian_velocity", gripper_action_space=None, camera_kwargs={}, do_reset=True, emg=False):
         # Initialize Gym Environment
         super().__init__()
 

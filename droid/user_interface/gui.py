@@ -1,10 +1,16 @@
 # Tkinter Imports #
 import math
 import random
+import re
+import json
 import threading
 import time
 import tkinter as tk
 import webbrowser
+from droid.camera_utils.wrappers.recorded_multi_camera_wrapper import RecordedMultiCameraWrapper
+from droid.trajectory_utils.trajectory_reader import TrajectoryReader
+from droid.trajectory_utils.trajectory_writer import TrajectoryWriter
+import h5py
 
 # Functionality Imports #
 from collections import defaultdict
@@ -21,7 +27,7 @@ from droid.misc.parameters import robot_ip
 from droid.user_interface.gui_parameters import *
 from droid.user_interface.misc import *
 from droid.user_interface.text import *
-from droid.trajectory_utils.misc import visualize_trajectory
+from droid.trajectory_utils.misc import visualize_timestep, visualize_trajectory
 
 
 class RobotGUI(tk.Tk):
@@ -640,6 +646,14 @@ class CollectEMGPage(tk.Frame):
         self.controller.bind("<KeyRelease>", self.moniter_keys, add="+")
         self._start_btn = None
 
+        self._emg_stream = None
+        self._session_folders = []   # list of trajectory folder paths
+        self._session_index = 0      # index into _session_folders
+        self._user_id = None
+
+        # State for current trajectory replay (managed in main thread)
+        self._current_traj_ctx = None
+
         title_lbl = tk.Label(self, text="Collect EMG Data Aligned to Trajectory",
                              font=Font(size=30, weight="bold"))
         title_lbl.place(relx=0.5, rely=0.05, anchor="n")
@@ -657,6 +671,15 @@ class CollectEMGPage(tk.Frame):
         instr_lbl = tk.Label(self, text=emg_collection_text, font=Font(size=20, slant="italic"))
         instr_lbl.place(relx=0.5, rely=0.20, anchor="n")
 
+        self._traj_status_lbl = tk.Label(
+            self,
+            text="",
+            font=Font(size=18),
+            wraplength=800,
+            justify="center"
+        )
+        self._traj_status_lbl.place(relx=0.5, rely=0.28, anchor="n")
+
         back_btn = tk.Button(
             self,
             text="BACK",
@@ -671,6 +694,7 @@ class CollectEMGPage(tk.Frame):
         group_lbl = tk.Label(self, text=emg_paths_label, font=Font(size=20, underline=True))
         group_lbl.place(relx=0.01, rely=0.6)
 
+        # We expect this to be an outer folder like task2-123 that contains trajectory folders
         self.emg_paths_txt = tk.Text(self, height=15, width=65, font=Font(size=15))
         self.emg_paths_txt.place(relx=0.02, rely=0.64)
 
@@ -679,38 +703,347 @@ class CollectEMGPage(tk.Frame):
             varied_camera=dict(image=True, resolution=(0, 0)),
         )
 
+        self.camera_type_to_string_dict = {
+            0: "hand_camera",
+            1: "varied_camera",
+            2: "fixed_camera",
+        }
+
+        self._redo_btn = tk.Button(
+            self,
+            text="REDO",
+            font=Font(size=18, weight="bold"),
+            padx=10, pady=5,
+            borderwidth=6,
+            command=self._redo_current_trajectory
+        )
+        self._next_btn = tk.Button(
+            self,
+            text="NEXT",
+            font=Font(size=18, weight="bold"),
+            padx=10, pady=5,
+            borderwidth=6,
+            command=self._go_to_next_trajectory
+        )
+
     def _on_start_clicked(self):
-        # disable button to prevent double-clicks
+
+        if not self._session_folders:
+            self._start_btn.config(state="disabled")
+            user_id, data_folders, n_episodes = self.controller.info["emg_info"]
+            self._user_id = user_id
+
+            t = threading.Thread(
+                target=self.start_collection, daemon=True,
+                args=(user_id, data_folders, int(n_episodes))
+            )
+            t.start()
+        else:
+            self._run_current_trajectory()
+
+    def start_collection(self, user_id, data_folders, n_episodes):
+
+        try:
+            emg_stream = self.controller.robot.env.emg_streams["emg_lower"]
+            self._emg_stream = emg_stream
+            rewrite_files = set()
+
+            for task in data_folders:
+                print(f"TASK {task}")
+                for traj_dir_path, traj_dir_name, traj_filenames in os.walk(f"/temp_droid_data/{task}"):
+                    print(f"traj_dir_path: {traj_dir_path}, traj_dir_name: {traj_dir_name}, traj_filenames: {traj_filenames}")
+                    file_match = "trajectory_emg_user_" + str(user_id) + ".h5"
+
+                    has_file_match = any(
+                        re.search(file_match, f) for f in traj_filenames
+                    )
+                    if has_file_match:
+                        print(f"Skipping {traj_dir_path} because user {user_id} already has an EMG file")
+                        continue
+                    
+                    #1) first check does this directory already have an EMG-augmented trajectory?
+                    # has_emg_file = any(
+                    #     re.search(r"^trajectory_emg_user_.*\.h5$", f) for f in traj_filenames
+                    # )
+                    # if has_emg_file:
+                    #     print(f"Skipping {traj_dir_path} because it already has EMG file")
+                    #     continue
+
+                    # 2) then does it have a base trajectory .h5 at all?
+                    has_h5 = any(f.lower().endswith(".h5") for f in traj_filenames)
+                    if has_h5:
+                        print("Directory has .h5 and no EMG file; adding to rewrite_files")
+                        rewrite_files.add(traj_dir_path)
+                        print(f"added to rewrite files: {traj_dir_path}")
+
+            if not rewrite_files:
+                print("No eligible trajectories found for EMG overwrite.")
+                self.after(0, self._no_trajectories_found_ui)
+                return
+
+            if len(rewrite_files) < n_episodes:
+                n_episodes = len(rewrite_files)
+                print(f"Requested more episodes than available. Will default to sampling {len(rewrite_files)}", flush=True)
+
+            sampled_folders = random.sample(list(rewrite_files), k=n_episodes)
+            print(f"HERE ARE THE RANDOMLY SAMPLED data_folders: {sampled_folders}", flush=True)
+
+            self._session_folders = sampled_folders
+            self._session_index = 0
+
+            self.after(0, self._prepare_first_session_ui)
+
+        finally:
+            pass
+
+    def _no_trajectories_found_ui(self):
+        self._traj_status_lbl.config(text="No eligible trajectories found to overwrite.")
+        self._start_btn.config(
+            state="normal",
+            text="START",
+            command=self._on_start_clicked
+        )
+
+    def _prepare_first_session_ui(self):
+        if not self._session_folders:
+            self._no_trajectories_found_ui()
+            return
+        self._show_prompt_for_current()
+
+    def _show_prompt_for_current(self):
+        idx = self._session_index
+        total = len(self._session_folders)
+        folder = self._session_folders[idx]
+
+        #default text
+        task_text = "Prepare for this trajectory. (Task description unavailable.)"
+
+        try:
+            # Find the only JSON file in this folder
+            json_files = [f for f in os.listdir(folder) if f.lower().endswith(".json")]
+            if json_files:
+                json_path = os.path.join(folder, json_files[0])
+                with open(json_path, "r") as jf:
+                    meta = json.load(jf)
+                if "current_task" in meta and isinstance(meta["current_task"], str):
+                    task_text = meta["current_task"]
+        except Exception as e:
+            print(f"[CollectEMGPage] Failed to load task description from JSON in {folder}: {e}")
+
+        self._traj_status_lbl.config(
+            text=f"Trajectory {idx + 1} of {total}\n\n{task_text}"
+        )
+
+        self._start_btn.config(
+            state="normal",
+            text="START TRAJECTORY",
+            command=self._run_current_trajectory
+        )
+
+        self._redo_btn.place_forget()
+        self._next_btn.place_forget()
+
+
+    def _run_current_trajectory(self):
+        if not self._session_folders or self._current_traj_ctx is not None:
+            return
+
+        folder = self._session_folders[self._session_index]
+        user_id = self._user_id
+
+        h5_filepath = os.path.join(folder, "trajectory.h5")
+        recording_folderpath = os.path.join(folder, "recordings", "SVO")
+        new_h5_filepath = os.path.join(folder, f"trajectory_emg_user_{str(user_id)}.h5")
+
+        if os.path.isfile(new_h5_filepath):
+            os.remove(new_h5_filepath)
+
+        with h5py.File(h5_filepath, "r") as f_in:
+            metadata = dict(f_in.attrs)
+
+        traj_reader = TrajectoryReader(h5_filepath, read_images=True)
+        traj_writer = TrajectoryWriter(new_h5_filepath, metadata=metadata, save_images=False)
+        camera_reader = RecordedMultiCameraWrapper(recording_folderpath, self.camera_kwargs) if recording_folderpath else None
+        horizon = traj_reader.length()
+
+        if hasattr(self._emg_stream, "is_connected") and not self._emg_stream.is_connected():
+            if hasattr(self._emg_stream, "connect"):
+                self._emg_stream.connect()
+
+        self._current_traj_ctx = {
+            "traj_reader": traj_reader,
+            "traj_writer": traj_writer,
+            "camera_reader": camera_reader,
+            "horizon": horizon,
+            "index": 0,
+            "folder": folder,
+            "dst_filepath": new_h5_filepath,
+        }
+
+        self._start_btn.config(state="disabled")
+        self._redo_btn.place_forget()
+        self._next_btn.place_forget()
+
+        self._traj_status_lbl.config(
+            text=f"Running trajectory {self._session_index + 1} of {len(self._session_folders)}...\n"
+        )
+        self._step_traj_replay()
+
+    def _step_traj_replay(self):
+        ctx = self._current_traj_ctx
+        if ctx is None:
+            return
+
+        i = ctx["index"]
+        horizon = ctx["horizon"]
+        traj_reader = ctx["traj_reader"]
+        traj_writer = ctx["traj_writer"]
+        camera_reader = ctx["camera_reader"]
+
+        if i >= horizon:
+            traj_reader.close()
+            if camera_reader is not None:
+                camera_reader.disable_cameras()
+            traj_writer.close()
+            self._current_traj_ctx = None
+            self._on_trajectory_complete()
+            return
+
+        try:
+            timestep = traj_reader.read_timestep()
+        except Exception as e:
+            print(f"[CollectEMGPage] Error reading timestep {i}: {e}")
+            # Abort gracefully
+            traj_reader.close()
+            if camera_reader is not None:
+                camera_reader.disable_cameras()
+            traj_writer.close()
+            self._current_traj_ctx = None
+            self._on_trajectory_complete()
+            return
+
+        if camera_reader is not None:
+            try:
+                timestamp_dict = timestep["observation"]["timestamp"]["cameras"]
+                camera_type_dict = {
+                    k: self.camera_type_to_string_dict[v]
+                    for k, v in timestep["observation"]["camera_type"].items()
+                }
+                camera_obs = camera_reader.read_cameras(
+                    index=i,
+                    camera_type_dict=camera_type_dict,
+                    timestamp_dict=timestamp_dict,
+                )
+                if camera_obs is not None:
+                    timestep["observation"].update(camera_obs)
+            except Exception as e:
+                print(f"[rewrite_emg_for_trajectory] Camera read failed at step {i}: {e}")
+
+
+        try:
+            visualize_timestep(
+                timestep,
+                max_width=1000,
+                max_height=500,
+                aspect_ratio=1.5,
+                pause_time=self.controller.robot.env.control_hz,
+            )
+        except Exception as e:
+            print(f"[rewrite_emg_for_trajectory] Visualization failed at step {i}: {e}")
+
+        # Read EMG and write timestep
+        emg_sample = self._emg_stream.read()
+        emg_sample = np.asarray(emg_sample, dtype=np.float32).copy()
+        timestep["observation"]["emg_lower"] = emg_sample
+        traj_writer.write_timestep(timestep)
+
+        ctx["index"] = i + 1
+
+        self.after(0, self._step_traj_replay)
+
+
+    def _on_trajectory_complete(self):
+        idx = self._session_index
+        total = len(self._session_folders)
+
+        self._traj_status_lbl.config(
+            text=f"Completed trajectory {idx + 1} of {total}.\n"
+                 f"Would you like to REDO it or move on?"
+        )
+
+        self._redo_btn.place(relx=0.35, rely=0.50, anchor="n")
+        next_label = "FINISH" if idx == total - 1 else "NEXT"
+        self._next_btn.config(text=next_label)
+        self._next_btn.place(relx=0.5, rely=0.50, anchor="n")
+
         self._start_btn.config(state="disabled")
 
-        #decide which trajectories to overwrite here:
-        data_folders = self.controller.info["emg_paths"]
+    def _redo_current_trajectory(self):
+        if not self._session_folders:
+            return
+        if self._current_traj_ctx is not None:
+            return
 
-        t = threading.Thread(target=self.start_collection, daemon=True, args=(data_folders,))
-        t.start()
+        folder = self._session_folders[self._session_index]
+        user_id = self._user_id
+        new_h5_filepath = os.path.join(folder, f"trajectory_emg_user_{str(user_id)}.h5")
 
-    def start_collection(self, data_folders):
-        """Long-running start logic."""
-        try:
-            # Example: call into controller or your EMG routine
-            # self.controller.start_emg_collection()
-            print("Starting EMG collection...")
-            for folder in data_folders:
-                #open folder
-                #visualize trajectory
-                h5_filepath = folder + "/trajectory.h5"
-                recording_folderpath = folder + "/recordings/SVO"
-                visualize_trajectory(filepath=h5_filepath, recording_folderpath=recording_folderpath, camera_kwargs=self.camera_kwargs)
-            # ... do work ...
-        finally:
-            # re-enable button on the Tk main thread
-            self.after(0, lambda: self._start_btn.config(state="normal"))
+        if os.path.isfile(new_h5_filepath):
+            try:
+                os.remove(new_h5_filepath)
+                print(f"[CollectEMGPage] Deleted {new_h5_filepath} for REDO.")
+            except Exception as e:
+                print(f"[CollectEMGPage] Failed to delete {new_h5_filepath}: {e}")
 
-    def get_emg_paths(self):
-        paths = self.emg_paths_txt.get("1.0", END).replace("\n", "")
-        paths = paths.replace(no_tasks_text, "").split(";")
-        paths = [t for t in paths if (not t.isspace() and len(t))]
-        return paths
+        self._traj_status_lbl.config(
+            text=f"Redoing trajectory {self._session_index + 1} of {len(self._session_folders)}.\n"
+                 f"Prepare and press 'START TRAJECTORY' when ready."
+        )
+
+        self._start_btn.config(
+            state="normal",
+            text="START TRAJECTORY",
+            command=self._run_current_trajectory
+        )
+
+        self._redo_btn.place_forget()
+        self._next_btn.place_forget()
+
+    def _go_to_next_trajectory(self):
+        if not self._session_folders:
+            return
+        if self._current_traj_ctx is not None:
+            return
+
+        if self._session_index >= len(self._session_folders) - 1:
+
+            self._traj_status_lbl.config(
+                text="All selected trajectories have been collected with EMG.\n"
+                     "You may start a new session if desired."
+            )
+            self._session_folders = []
+            self._session_index = 0
+            self._start_btn.config(
+                state="normal",
+                text="START",
+                command=self._on_start_clicked
+            )
+            self._redo_btn.place_forget()
+            self._next_btn.place_forget()
+            return
+
+        self._session_index += 1
+        self._show_prompt_for_current()
+
+    def get_emg_info(self):
+        info = self.emg_paths_txt.get("1.0", END).replace("\n", "")
+        print(f"INFO FIRST {info}")
+        info = info.split(";")
+        print(f"info after splitting {info}")
+        info = [t for t in info if (not t.isspace() and len(t))]
+        print(f"info after filtering {info}")
+        user_id, paths, n_episodes = info[0], info[1:-1], info[-1]
+        return user_id, paths, n_episodes
     
     def moniter_keys(self, event):
         if self.controller.curr_frame != self:
@@ -719,7 +1052,7 @@ class CollectEMGPage(tk.Frame):
             self.controller.frames[CameraPage].set_home_frame(CollectEMGPage)
             self.controller.show_frame(CameraPage, wait=True)
         
-        self.controller.info["emg_paths"] = self.get_emg_paths()
+        self.controller.info["emg_info"] = self.get_emg_info()
 
     def initialize_page(self):
         pass
