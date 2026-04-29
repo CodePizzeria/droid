@@ -20,7 +20,9 @@ import tqdm
 import tyro
 from droid.misc.parameters import hand_camera_id, varied_camera_1_id
 import json
+from droid.misc.tcp import ConnectionManager
 faulthandler.enable()
+from collections import defaultdict
 
 # DROID data collection frequency -- we slow down execution to match this frequency
 DROID_CONTROL_FREQUENCY = 15
@@ -86,10 +88,30 @@ def main(args: Args):
     # Connect to the policy server
     policy_client = websocket_client_policy.WebsocketClientPolicy(args.remote_host, args.remote_port)
 
+    #Connect to hand gesture server
+    conn = ConnectionManager(ip="192.168.0.18", port=5001, mode="client")
+    print("Connected to the hand gesture server")
+
     df = pd.DataFrame(columns=["prompt", "success", "duration", "video_filename"])
 
+    GESTURE_INSTR_MAP = {
+        'sign_b': 'pick up the blue bowl and place it on the center of the white mat',
+        'sign_o': 'pick up the orange bowl and place it on the center of the white mat',
+        'sign_c': 'pick up the yellow cup and place it on the mat',
+        'sign_f': 'pick up the fruit loops box and pour the cereal into the bowl',
+        'sign_k': 'pick up the cocoa krispies box and pour the cereal into the bowl',
+        'sign_stop': 'stop pouring the cereal and put it down off to the side',
+        'unknown': 'remain at starting position',
+        'sign_w': 'remain at starting position',
+        'sign_d': 'remain at starting position',
+        'sign_a': 'remain at starting position',
+        'sign_v': 'remain at starting position',
+    }
+
     while True:
-        instruction = input("Enter instruction: ")
+        #instruction = input("Enter instruction: ")
+        ready_text = input("Press any key to begin trajectory")
+        instruction = "remain at starting position"
 
         # Rollout parameters
         actions_from_chunk_completed = 0
@@ -115,6 +137,14 @@ def main(args: Args):
                     # Save the first observation to disk
                     save_to_disk=t_step == 0,
                 )
+                #Update instruction here based on hand gesture.
+                # instruction = 
+                conn.recv()
+                for msg in conn.parse_buffer(msg_type="string"):
+                    event = json.loads(msg)
+                    print(f"  {event['gesture']} ({event['confidence']:.2f})")
+                    instruction = GESTURE_INSTR_MAP[event['gesture']]
+                    print(f"instruction {instruction}")
 
                 video.append(curr_obs[f"{args.external_camera}_image"])
 
@@ -141,7 +171,7 @@ def main(args: Args):
                         # this returns action chunk [10, 8] of 10 joint velocity actions (7) + gripper position (1)
                         pred_action_chunk = policy_client.infer(request_data)["actions"]
                         print(f"pred_action_chunk: {pred_action_chunk}. shape: {pred_action_chunk.shape}", flush=True)
-                    assert pred_action_chunk.shape == (15, 8)
+                    assert pred_action_chunk.shape == (16, 8)
 
                 # Select current action to execute from chunk
                 action = pred_action_chunk[actions_from_chunk_completed]

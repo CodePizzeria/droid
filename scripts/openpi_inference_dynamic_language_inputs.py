@@ -10,6 +10,7 @@ import time
 from moviepy.editor import ImageSequenceClip
 import numpy as np
 import sys
+import select
 sys.path.append("/app/openpi-client/src")
 from openpi_client import image_tools
 from openpi_client import websocket_client_policy
@@ -49,7 +50,7 @@ class Args:
     remote_port: int = (
         8000  # point this to the port of the policy server, default server port for openpi servers is 8000
     )
-
+    run_name: str = "default"   
 
 # We are using Ctrl+C to optionally terminate rollouts early -- however, if we press Ctrl+C while the policy server is
 # waiting for a new action chunk, it will raise an exception and the server connection dies.
@@ -98,7 +99,7 @@ def main(args: Args):
         # Prepare to save video of rollout
         os.makedirs("results", exist_ok=True)
         timestamp = datetime.datetime.now().strftime("%Y_%m_%d_%H:%M:%S")
-        save_filename = "results/video_" + timestamp
+        save_filename = "results/video_" + timestamp + instruction + args.run_name
         jsonl_filename = save_filename + ".jsonl"
         jsonl_f = open(jsonl_filename, "w", encoding="utf-8")
 
@@ -108,6 +109,12 @@ def main(args: Args):
         for t_step in bar:
             start_time = time.time()
             try:
+                # waiting for input 
+                if select.select([sys.stdin], [], [], 0)[0]:
+                    sys.stdin.readline() # Clear the buffer of the character you just typed
+                    print("\n[PAUSED] Robot stopped. Type new instruction to resume:")
+                    instruction = input(">> ")
+                    actions_from_chunk_completed = 0 # Force a fresh policy call
                 # Get the current observation
                 curr_obs = _extract_observation(
                     args,
@@ -140,7 +147,7 @@ def main(args: Args):
                     with prevent_keyboard_interrupt():
                         # this returns action chunk [10, 8] of 10 joint velocity actions (7) + gripper position (1)
                         pred_action_chunk = policy_client.infer(request_data)["actions"]
-                        print(f"pred_action_chunk: {pred_action_chunk}. shape: {pred_action_chunk.shape}", flush=True)
+                        # print(f"pred_action_chunk: {pred_action_chunk}. shape: {pred_action_chunk.shape}", flush=True)
                     assert pred_action_chunk.shape == (15, 8)
 
                 # Select current action to execute from chunk
@@ -163,8 +170,10 @@ def main(args: Args):
                 record = {
                     "timestamp": datetime.datetime.now().isoformat(),
                     "t_step": int(t_step),
+                    "cartesian_position": curr_obs["cartesian_position"].tolist(),
                     "joint_position": curr_obs["joint_position"].tolist(),
                     "gripper_position": curr_obs["gripper_position"].tolist(),
+                    "prompt": instruction,
                     # "emg": curr_obs["emg"].tolist(),
                 }
                 jsonl_f.write(json.dumps(record) + "\n")
@@ -198,6 +207,7 @@ def main(args: Args):
 
         df = df.append(
             {
+                "run_name": args.run_name,
                 "prompt": instruction,
                 "success": success,
                 "duration": t_step,
@@ -209,10 +219,9 @@ def main(args: Args):
         if input("Do one more eval? (enter y or n) ").lower() != "y":
             break
         env.reset()
-
     
     timestamp = datetime.datetime.now().strftime("%I:%M%p_%B_%d_%Y")
-    csv_filename = os.path.join("results", f"eval_{timestamp}.csv")
+    csv_filename = os.path.join("results", f"eval_{timestamp}_{args.run_name}.csv")
     df.to_csv(csv_filename)
     print(f"Results saved to {csv_filename}")
 

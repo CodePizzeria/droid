@@ -64,7 +64,7 @@ class DROIDUploadConfig:
 
     # Important :: Only update once you're sure *all* demonstrations prior to this date have been uploaded!
     #   > If not running low on disk, leave alone!
-    start_date: str = "2025-11-15"                  # Start indexing/processing/uploading demos starting from this date
+    start_date: str = "2026-03-10"                  # Start indexing/processing/uploading demos starting from this date
 
     # AWS/S3 Upload Credentials
     credentials_json: Path = Path(                  # Path to JSON file with Access Key/Secret Key (don't push to git!)
